@@ -107,7 +107,8 @@ vec3 get_diffuse_lighting(
 	float NoL,
 	float NoV,
 	float NoH,
-	float LoV
+	float LoV,
+	bool is_leaves
 ) {
 #if defined PROGRAM_GBUFFERS_WATER
 	// Small optimization, don't calculate diffuse lighting when albedo is 0 (eg water)
@@ -126,7 +127,12 @@ vec3 get_diffuse_lighting(
 #ifdef SHADOW
 	vec3 diffuse = vec3(lift(max0(NoL), 0.25 * rcp(SHADING_STRENGTH)) * (1.0 - 0.5 * material.sss_amount));
 	vec3 bounced = 0.033 * (1.0 - shadows) * (1.0 - 0.1 * max0(normal.y)) * pow1d5(ao + eps) * pow4(light_levels.y) * BOUNCED_LIGHT_I;
-	vec3 sss = sss_approx(material.albedo, material.sss_amount, material.sheen_amount, mix(sss_depth, 0.0, shadow_distance_fade), LoV, shadows.x);
+
+	// For leaves, ignore cast shadow depth so SSS glow is driven purely by sun angle
+	float sss_shadow = is_leaves ? 1.0 : shadows.x;
+	float leaf_NoL = dot(normal, light_dir);
+	float effective_sss_depth = is_leaves ? mix(1.5, 0.0, clamp01(leaf_NoL)) : mix(sss_depth, 0.0, shadow_distance_fade);
+	vec3 sss = sss_approx(material.albedo, material.sss_amount, material.sheen_amount, effective_sss_depth, LoV, sss_shadow);
 
 	// Adjust SSS outside of shadow distance
 	sss *= mix(1.0, (ao + pi * ambient_sss) * (clamp01(NoL) * 0.8 + 0.2), clamp01(shadow_distance_fade));

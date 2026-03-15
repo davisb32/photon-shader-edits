@@ -272,7 +272,8 @@ void main() {
 		NoL,
 		NoV,
 		NoH,
-		LoV
+		LoV,
+		false
 	);
 
 	// Apply fog

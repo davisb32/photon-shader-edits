@@ -285,6 +285,7 @@ void main() {
 #else
 		fragment_color = draw_sky(direction_world);
 #endif
+		fragment_color *= vec3(1.5, 0.05, 0.05); // red sci-fi sky tint
 
 		// Apply blocky clouds 
 #if defined WORLD_OVERWORLD && defined BLOCKY_CLOUDS 
@@ -428,7 +429,33 @@ void main() {
 
 		// Shadows
 
-		float NoL = dot(normal, light_dir);
+		//float NoL = dot(normal, light_dir);
+		//float NoL = 1.0;
+
+		// Vanilla-style hardcoded face shading
+		float peak  = 0.66;
+		float floor = 0.15;
+
+		// Override for leaves
+		if (material_mask == MATERIAL_LEAVES) {
+			peak  = 1.0;
+			floor = 0.15;
+		}
+
+		float top         = peak;
+		float north_south = mix(floor, peak, 0.666);
+		float east_west   = mix(floor, peak, 0.333);
+		float bottom      = floor;
+
+		float NoL;
+		if (abs(flat_normal.y) > 0.9) {
+			NoL = flat_normal.y > 0.0 ? top : bottom;
+		} else if (abs(flat_normal.z) > 0.5) {
+			NoL = north_south;
+		} else {
+			NoL = east_west;
+		}
+
 		float NoV = clamp01(dot(normal, -direction_world));
 		float LoV = dot(light_dir, -direction_world);
 		float halfway_norm = inversesqrt(2.0 * LoV + 2.0);
@@ -447,6 +474,7 @@ void main() {
 		vec3 shadows;
 
         shadows = calculate_shadows(position_scene, flat_normal, light_levels.y, cloud_shadows, material.sss_amount, shadow_distance_fade, sss_depth);
+		shadows = mix(vec3(1.0), shadows, 0.0); // 0.0 = no shadows, 1.0 = full shadows
 
 	#ifdef DISTANT_HORIZONS
 		if (is_dh_terrain) {
@@ -476,20 +504,21 @@ void main() {
 			ao,
 			ambient_sss,
 			sss_depth,
-#ifdef CLOUD_SHADOWS
+		#ifdef CLOUD_SHADOWS
 			cloud_shadows,
-#endif
+		#endif
 			shadow_distance_fade,
 			NoL,
 			NoV,
 			NoH,
-			LoV
+			LoV,
+			material_mask == MATERIAL_LEAVES  // add this line
 		);
 
 		// Specular highlight
 
 #if defined WORLD_OVERWORLD || defined WORLD_END
-		fragment_color += get_specular_highlight(material, NoL, NoV, NoH, LoV, LoH) * light_color * shadows * cloud_shadows * ao;
+		//fragment_color += get_specular_highlight(material, NoL, NoV, NoH, LoV, LoH) * light_color * shadows * cloud_shadows * ao;
 #endif
 
 		// Specular reflections
@@ -516,7 +545,10 @@ void main() {
 		// Edge highlight
 
 #ifdef EDGE_HIGHLIGHT
-		fragment_color *= 1.0 + 0.5 * get_edge_highlight(position_scene, flat_normal, depth, material_mask);
+		//fragment_color *= 1.0 + 1.0 * get_edge_highlight(position_scene, flat_normal, depth, material_mask);
+		float edge = get_edge_highlight(position_scene, flat_normal, depth, material_mask);
+		float luma = dot(fragment_color, vec3(0.299, 0.587, 0.114));
+		fragment_color = mix(vec3(luma), fragment_color, 1.0 + 0.3 * edge) * (1.0 + 0.5 * edge);
 #endif
 
 		// Apply fog

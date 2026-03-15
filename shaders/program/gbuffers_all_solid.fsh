@@ -284,8 +284,8 @@ void main() {
 	const float vanilla_ao_strength = 0.9;
 	const float vanilla_ao_lift     = 0.5;
 	#else
-	const float vanilla_ao_strength = 1.0;
-	const float vanilla_ao_lift     = 0.0;
+	const float vanilla_ao_strength = 0.75;
+	const float vanilla_ao_lift     = 0.2;
 	#endif
 
 	base_color.rgb *= lift(vanilla_ao, vanilla_ao_lift) * vanilla_ao_strength + (1.0 - vanilla_ao_strength);

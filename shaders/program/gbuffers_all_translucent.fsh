@@ -229,13 +229,13 @@ Material get_water_material(
 #if WATER_TEXTURE == WATER_TEXTURE_HIGHLIGHT || WATER_TEXTURE == WATER_TEXTURE_HIGHLIGHT_UNDERGROUND
 	float edge_highlight = cube(max0(1.0 - 2.0 * dist)) * (1.0 + 8.0 * texture_highlight);
 #else
-	float edge_highlight = cube(max0(1.0 - 2.0 * dist));
+	float edge_highlight = pow(max0(1.0 - 2.0 * dist), 8.0);
 #endif
-	edge_highlight *= WATER_EDGE_HIGHLIGHT_INTENSITY * max0(normal.y) * (1.0 - 0.5 * sqr(light_levels.y));;
+	edge_highlight *= WATER_EDGE_HIGHLIGHT_INTENSITY * 100.0 * max0(normal.y) * (1.0 - 0.5 * sqr(light_levels.y));
 
-	material.albedo += 0.1 * edge_highlight / mix(1.0, max(dot(ambient_color, luminance_weights_rec2020), 0.5), light_levels.y);
+	material.albedo += 0.02 * edge_highlight / mix(1.0, max(dot(ambient_color, luminance_weights_rec2020), 0.5), light_levels.y);
 	material.albedo  = clamp01(material.albedo);
-	alpha += edge_highlight;
+	alpha += edge_highlight * 0.2;
 #endif
 
 	return material;
@@ -528,7 +528,8 @@ void main() {
 		NoL,
 		NoV,
 		NoH,
-		LoV
+		LoV,
+		false
 	) * fragment_color.a;
 
 	// Specular highlight
