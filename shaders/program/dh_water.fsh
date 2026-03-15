@@ -245,7 +245,7 @@ void main() {
 	float NoH = (NoL + NoV) * halfway_norm;
 	float LoH = LoV * halfway_norm + halfway_norm;
 
-	vec3 shadows = vec3(pow8(light_levels.y));
+	vec3 shadows = vec3(sqrt(1.0));
 	#define sss_depth 0.0
 	#define shadow_distance_fade 0.0
 

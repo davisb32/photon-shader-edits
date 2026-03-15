@@ -454,7 +454,7 @@ void main() {
 		}
 	#endif
 #else
-		vec3 shadows = vec3(sqrt(ao) * pow8(light_levels.y));
+		vec3 shadows = vec3(sqrt(ao));
 		#define sss_depth 0.0
 		#define shadow_distance_fade 0.0
 #endif
@@ -568,6 +568,6 @@ void main() {
 
 		// Apply purkinje shift
 
-		fragment_color = purkinje_shift(fragment_color, light_levels);
+		fragment_color = purkinje_shift(fragment_color, vec2(light_levels.x, 1.0));
 	}
 }

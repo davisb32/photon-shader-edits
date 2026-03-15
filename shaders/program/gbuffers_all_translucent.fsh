@@ -250,7 +250,7 @@ vec4 water_absorption_approx(
 	float cloud_shadows
 ) {
 	vec3 biome_water_color = srgb_eotf_inv(tint.rgb) * rec709_to_working_color;
-	vec3 absorption_coeff = biome_water_coeff(biome_water_color);
+	vec3 absorption_coeff = biome_water_coeff(biome_water_color) * 8;
 	float dist = layer_dist * float(isEyeInWater != 1 || NoV >= 0.0);
 
 	mat2x3 water_fog = water_fog_simple(
@@ -573,6 +573,7 @@ void main() {
 			dot(tbn[2], direction_world), 
 			cloud_shadows
 		);
+		// fragment_color.a = 1.0; // force water to be fully opaque
 
 	#ifdef SNELLS_WINDOW
 		if (isEyeInWater == 1) {

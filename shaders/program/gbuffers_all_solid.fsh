@@ -250,6 +250,13 @@ void main() {
 	//--//
 
 	vec4 base_color   = read_tex(gtexture) * tint;
+
+	#if defined PROGRAM_GBUFFERS_TERRAIN
+	// Remove vanilla directional shading baked into vertex colors
+	float tint_luma = max(tint.r, max(tint.g, tint.b));
+	if (tint_luma > 0.01) base_color.rgb /= tint_luma;
+	#endif
+
 #ifdef NORMAL_MAPPING
 	vec3 normal_map   = read_tex(normals).xyz;
 #endif
