@@ -280,13 +280,33 @@ void main() {
 #endif
 
 #if defined PROGRAM_GBUFFERS_TERRAIN && defined VANILLA_AO
-	#if SHADER_AO != SHADER_AO_NONE
-	const float vanilla_ao_strength = 0.9;
-	const float vanilla_ao_lift     = 0.5;
-	#else
-	const float vanilla_ao_strength = 1.0;
-	const float vanilla_ao_lift     = 0.0;
-	#endif
+
+	//CUSTOM EDIT distance-based vanilla AO
+
+	bool enable_distance_ao = true; // true = on, false = off
+
+	float vanilla_ao_strength;
+	float vanilla_ao_lift;
+
+	if (enable_distance_ao) {
+		float ao_near_chunks = 2.0; //within this chunk radius, max AO
+		float ao_far_chunks  = 32.0; //beyond this chunk radius, min AO
+		float ao_dist_factor = 1.0 - linear_step(ao_near_chunks * 16.0, ao_far_chunks * 16.0, length(scene_pos));
+
+		#if SHADER_AO != SHADER_AO_NONE
+		vanilla_ao_strength = mix(0.0, 0.9, ao_dist_factor);
+		vanilla_ao_lift     = mix(0.0, 0.5, ao_dist_factor);
+		#else
+		vanilla_ao_strength = mix(0.0, 1.0, ao_dist_factor); //min strength, max strength
+		vanilla_ao_lift     = mix(0.0, 0.0, ao_dist_factor); // lift above zero makes it less dark
+		#endif
+	} else {
+		// Default vanilla values when disabled
+		vanilla_ao_strength = 1.0;
+		vanilla_ao_lift     = 0.0;
+	}
+
+	//--------------END------------------
 
 	base_color.rgb *= lift(vanilla_ao, vanilla_ao_lift) * vanilla_ao_strength + (1.0 - vanilla_ao_strength);
 #endif

@@ -226,12 +226,19 @@ Material get_water_material(
 #ifdef WATER_EDGE_HIGHLIGHT
 	float dist = layer_dist * max(abs(direction_world.y), eps);
 
+	//CUSTOM EDIT water edge highlight width and intensity
+	float edge_intensity = 3.0; // increase for brighter edge, 1.0 = default
+
+	float player_dist  = length(position_scene);
+	float edge_width   = mix(7, 1, linear_step(16.0, 48.0, player_dist));
+	//--------------END------------------
+
 #if WATER_TEXTURE == WATER_TEXTURE_HIGHLIGHT || WATER_TEXTURE == WATER_TEXTURE_HIGHLIGHT_UNDERGROUND
-	float edge_highlight = cube(max0(1.0 - 2.0 * dist)) * (1.0 + 8.0 * texture_highlight);
+	float edge_highlight = cube(max0(1.0 - edge_width * dist)) * (1.0 + 8.0 * texture_highlight);
 #else
-	float edge_highlight = cube(max0(1.0 - 2.0 * dist));
+	float edge_highlight = cube(max0(1.0 - edge_width * dist));
 #endif
-	edge_highlight *= WATER_EDGE_HIGHLIGHT_INTENSITY * max0(normal.y) * (1.0 - 0.5 * sqr(light_levels.y));;
+	edge_highlight *= WATER_EDGE_HIGHLIGHT_INTENSITY * edge_intensity * max0(normal.y) * (1.0 - 0.5 * sqr(light_levels.y));
 
 	material.albedo += 0.1 * edge_highlight / mix(1.0, max(dot(ambient_color, luminance_weights_rec2020), 0.5), light_levels.y);
 	material.albedo  = clamp01(material.albedo);
@@ -250,7 +257,17 @@ vec4 water_absorption_approx(
 	float cloud_shadows
 ) {
 	vec3 biome_water_color = srgb_eotf_inv(tint.rgb) * rec709_to_working_color;
-	vec3 absorption_coeff = biome_water_coeff(biome_water_color);
+	
+	//CUSTOM EDIT increase water absorption to make water more opaque
+
+	float water_opacity = 1; // 1.0 = default absorption, increase for opaquer water
+
+	//----WARNING----: anything not default will create seams when using distant horizons.
+
+	vec3 absorption_coeff = biome_water_coeff(biome_water_color) * water_opacity;
+
+	//--------------END------------------
+
 	float dist = layer_dist * float(isEyeInWater != 1 || NoV >= 0.0);
 
 	mat2x3 water_fog = water_fog_simple(
@@ -573,6 +590,16 @@ void main() {
 			dot(tbn[2], direction_world), 
 			cloud_shadows
 		);
+
+		//CUSTOM EDIT toggle to force water fully opaque
+
+		bool force_water_opaque = true; // Set to true = opaque water, false = absorption-based transparency
+
+		if (is_water && force_water_opaque) {
+			fragment_color.a = 1.0;
+		}
+
+		//--------------END------------------
 
 	#ifdef SNELLS_WINDOW
 		if (isEyeInWater == 1) {

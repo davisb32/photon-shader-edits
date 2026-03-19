@@ -100,7 +100,13 @@ void main() {
 
 #if defined PROGRAM_GBUFFERS_TERRAIN
 	vanilla_ao = gl_Color.a < 0.1 ? 1.0 : gl_Color.a; // fixes models where vanilla ao breaks (eg lecterns)
-	vanilla_ao = material_mask == 5 ? 1.0 : vanilla_ao; // no vanilla ao on leaves
+	
+	//CUSTOM EDIT enable vanilla AO on leaves
+
+	//vanilla_ao = material_mask == 5 ? 1.0 : vanilla_ao; // no vanilla ao on leaves
+	
+	//--------------END------------------
+	
 	tint.a = 1.0;
 
 	#ifdef POM

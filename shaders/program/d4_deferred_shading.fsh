@@ -238,6 +238,24 @@ void main() {
 			&& !(sunAngle > 0.5 && any(equal(ivec3(moonPhase), ivec3(3, 4, 5)))) 
 	);
 
+	//CUSTOM EDIT sky tint — independent horizon and overhead colors
+
+	float atmo_brightness = 1.0;                   // increase for brighter sky
+	float atmo_contrast   = 1.0;                   // increase for more difference between horizon and overhead
+	vec3  atmo_tint_horizon  = vec3(0.7, 1.0, 1.0); // teal/cyan near horizon
+	vec3  atmo_tint_overhead = vec3(0.4, 0.6, 1.6); // vivid blue overhead — pushed further for more contrast
+
+	float sky_angle = clamp01(direction_world.y);
+
+	// Apply contrast by pushing sky_angle away from 0.5
+	float sky_angle_contrasted = clamp01((sky_angle - 0.5) * atmo_contrast + 0.5);
+
+	vec3 atmo_tint = mix(atmo_tint_horizon, atmo_tint_overhead, sky_angle_contrasted);
+
+	atmosphere = atmosphere * atmo_tint * atmo_brightness;
+
+	//--------------END------------------
+
 	// Read clouds/aurora/crepuscular rays
 
 	float clouds_apparent_distance;
@@ -331,6 +349,12 @@ void main() {
 		uint material_mask = uint(255.0 * data[1].y);
 		vec3 flat_normal   = decode_unit_vector(data[2]);
 		vec2 light_levels  = data[3];
+
+		//CUSTOM EDIT fullbright
+
+		light_levels.y = 1.0;
+
+		//--------------END------------------
 
 #if !defined USE_SEPARATE_ENTITY_DRAWS
 		uint overlay_id = uint(255.0 * overlays.a);
@@ -428,7 +452,38 @@ void main() {
 
 		// Shadows
 
-		float NoL = dot(normal, light_dir);
+		//CUSTOM EDIT vanilla-style hardcoded face shading
+
+		//float NoL = dot(normal, light_dir);
+
+		float peak  = 0.66;
+		float floor = 0.15;
+
+		if (material_mask == MATERIAL_LEAVES) {
+			peak  = 1.0;
+			floor = 0.15;
+		}
+
+		float top         = peak;
+		float north_south = mix(floor, peak, 0.666);
+		float east_west   = mix(floor, peak, 0.333);
+		float bottom      = floor;
+
+		float NoL;
+		if (material_mask == MATERIAL_SMALL_PLANTS
+		|| material_mask == MATERIAL_TALL_PLANTS_LOWER
+		|| material_mask == MATERIAL_TALL_PLANTS_UPPER) {
+			NoL = top; // billboard vegetation matches grass block top face
+		} else if (abs(flat_normal.y) > 0.9) {
+			NoL = flat_normal.y > 0.0 ? top : bottom;
+		} else if (abs(flat_normal.z) > 0.5) {
+			NoL = north_south;
+		} else {
+			NoL = east_west;
+		}
+
+		//--------------END------------------
+		
 		float NoV = clamp01(dot(normal, -direction_world));
 		float LoV = dot(light_dir, -direction_world);
 		float halfway_norm = inversesqrt(2.0 * LoV + 2.0);
@@ -447,6 +502,12 @@ void main() {
 		vec3 shadows;
 
         shadows = calculate_shadows(position_scene, flat_normal, light_levels.y, cloud_shadows, material.sss_amount, shadow_distance_fade, sss_depth);
+		
+		//CUSTOM EDIT disable cast shadows
+
+		shadows = vec3(1.0); 
+
+		//--------------END------------------
 
 	#ifdef DISTANT_HORIZONS
 		if (is_dh_terrain) {
@@ -489,7 +550,12 @@ void main() {
 		// Specular highlight
 
 #if defined WORLD_OVERWORLD || defined WORLD_END
-		fragment_color += get_specular_highlight(material, NoL, NoV, NoH, LoV, LoH) * light_color * shadows * cloud_shadows * ao;
+		
+		//CUSTOM EDIT remove specular highlights
+
+		//fragment_color += get_specular_highlight(material, NoL, NoV, NoH, LoV, LoH) * light_color * shadows * cloud_shadows * ao;
+
+		//--------------END------------------
 #endif
 
 		// Specular reflections
@@ -516,7 +582,25 @@ void main() {
 		// Edge highlight
 
 #ifdef EDGE_HIGHLIGHT
-		fragment_color *= 1.0 + 0.5 * get_edge_highlight(position_scene, flat_normal, depth, material_mask);
+		//fragment_color *= 1.0 + 0.5 * get_edge_highlight(position_scene, flat_normal, depth, material_mask);
+
+		//CUSTOM EDIT edge highlight on blocks with brightness and saturation control
+
+		float edge = get_edge_highlight(position_scene, flat_normal, depth, material_mask);
+
+		float edge_brightness = 0.75; // Increase to make edges brighter, decrease toward 0.0 to disable
+		float edge_saturation = 1.2; // Increase for more vivid edges, only affects edge pixels
+
+		float luma = dot(fragment_color, vec3(0.299, 0.587, 0.114));
+
+		// 1.0 + (edge_saturation - 1.0) * edge means:
+		// when edge=0 -> mix factor is 1.0 -> fragment_color unchanged
+		// when edge=1 -> mix factor is edge_saturation -> full saturation boost
+		fragment_color = mix(vec3(luma), fragment_color, 1.0 + (edge_saturation - 1.0) * edge);
+		fragment_color *= 1.0 + edge_brightness * edge;
+
+		//--------------END------------------
+
 #endif
 
 		// Apply fog
@@ -565,6 +649,38 @@ void main() {
 		);
 	#endif
 #endif
+
+		//CUSTOM EDIT two-pass stylized fog
+
+		bool enable_custom_fog = true; // true = on, false = off
+
+		if (enable_custom_fog) {
+
+			// Art direction colors
+			vec3 overhead_sky_color = vec3(0.1, 0.2, 0.7);  // deep blue — silhouette/ridge color
+			vec3 horizon_sky_color  = vec3(0.9, 0.85, 0.6); // light yellow — low altitude haze color
+
+			// Pass 1 — distance fog (deep blue)
+			float fog1_start      = 25.0 * 16.0;
+			float fog1_end        = 50.0 * 16.0;
+			float fog1_opacity    = 0.95;
+			float fog1_factor     = smoothstep(fog1_start, fog1_end, view_distance) * fog1_opacity;
+			fragment_color        = mix(fragment_color, overhead_sky_color, fog1_factor);
+
+			// Pass 2 — low altitude yellow haze
+			float fog2_start         = 25.0 * 16.0;
+			float fog2_end           = 50.0 * 16.0;
+			float fog2_opacity       = 0.2;
+			float fog2_height_start  = -64.0;
+			float fog2_height_end    = 220.0;
+			float fog2_dist_factor   = smoothstep(fog2_start, fog2_end, view_distance);
+			float fog2_height_factor = clamp01(1.0 - (position_world.y - fog2_height_start) / (fog2_height_end - fog2_height_start));
+			float fog2_factor        = fog2_dist_factor * fog2_height_factor * fog2_opacity;
+			fragment_color           = mix(fragment_color, horizon_sky_color, fog2_factor);
+
+		}
+
+		//--------------END------------------
 
 		// Apply purkinje shift
 
