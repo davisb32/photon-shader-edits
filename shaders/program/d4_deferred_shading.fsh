@@ -238,21 +238,92 @@ void main() {
 			&& !(sunAngle > 0.5 && any(equal(ivec3(moonPhase), ivec3(3, 4, 5)))) 
 	);
 
-	//CUSTOM EDIT sky tint — independent horizon and overhead colors
+	//CUSTOM EDIT fully art-directed sky and fog system
+	// Colors: RGB 0-255. Times: Minecraft ticks (0 = 6 AM, 6000 = noon, 12000 = 6 PM, 18000 = midnight)
 
-	float atmo_brightness = 1.0;                   // increase for brighter sky
-	float atmo_contrast   = 1.0;                   // increase for more difference between horizon and overhead
-	vec3  atmo_tint_horizon  = vec3(0.7, 1.0, 1.0); // teal/cyan near horizon
-	vec3  atmo_tint_overhead = vec3(0.4, 0.6, 1.6); // vivid blue overhead — pushed further for more contrast
+	#define RGB(r,g,b) (srgb_eotf_inv(vec3(float(r), float(g), float(b)) / 255.0) * rec709_to_working_color)
 
-	float sky_angle = clamp01(direction_world.y);
+	// ---- TIME PARAMETERS (edit these) ----
+	const float SUNSET_TIME    = 12000.0;  // tick of peak sunset center
+	const float SUNRISE_TIME   =     0.0;  // tick of peak sunrise center (0 = 6 AM)
+	const float COLOR_HOLD     =  1000.0;  // ticks sunset/sunrise held at full strength
+	const float TRANS_DURATION =  1000.0;  // ticks each crossfade takes
 
-	// Apply contrast by pushing sky_angle away from 0.5
-	float sky_angle_contrasted = clamp01((sky_angle - 0.5) * atmo_contrast + 0.5);
+	// ---- SKY & FOG COLORS (edit these) ----
 
-	vec3 atmo_tint = mix(atmo_tint_horizon, atmo_tint_overhead, sky_angle_contrasted);
+	// ---- NOON ----
+	vec3 sky_ovr_noon  = RGB(255,0,0);
+	vec3 sky_hor_noon  = RGB(0,255,0);
+	vec3 fog_dist_noon = RGB(0,255,255);
+	vec3 fog_mist_noon = RGB(255,255,0);
 
-	atmosphere = atmosphere * atmo_tint * atmo_brightness;
+	// ---- SUNSET ----
+	vec3 sky_ovr_sunset    = RGB( 15,  20,  80);  // deep indigo
+	vec3 sky_hor_sunset    = RGB(255,  95,  30);  // vivid orange
+	vec3 fog_dist_sunset   = sky_ovr_sunset;
+	vec3 fog_mist_sunset   = sky_hor_sunset;
+
+	// ---- MIDNIGHT ----
+	vec3 sky_ovr_midnight  = RGB(10,20,77);
+	vec3 sky_hor_midnight  = RGB(11,83,144);
+	vec3 fog_dist_midnight = RGB(1,27,69);
+	vec3 fog_mist_midnight = RGB(0,40,106);
+
+	// ---- SUNRISE ----
+	vec3 sky_ovr_sunrise  = RGB(68,133,175);
+	vec3 sky_hor_sunrise  = RGB(255,147,70);
+	vec3 fog_dist_sunrise = RGB(61,92,123);
+	vec3 fog_mist_sunrise = RGB(169,103,105);
+
+	// ---- TIME BLEND SETUP ----
+	// Shift working time by 3000 ticks (= 9 AM) so no transition straddles the 0/24000 wrap boundary.
+	// All 4 transitions land cleanly inside [0, 24000] in shifted space.
+	float mc_time = mod(float(worldTime), 24000.0);
+	float t       = mod(mc_time - 3000.0 + 24000.0, 24000.0);
+
+	float t_sunset   = mod(SUNSET_TIME  - 3000.0 + 24000.0, 24000.0);
+	float t_midnight = mod(18000.0      - 3000.0 + 24000.0, 24000.0);
+	float t_sunrise  = mod(SUNRISE_TIME - 3000.0 + 24000.0, 24000.0);
+
+	float hh = COLOR_HOLD * 0.5;
+
+	// Sequential blend factors — each one a one-way ramp
+	// Chain order: noon -> sunset -> midnight -> sunrise -> noon
+	// Noon and midnight dominate naturally; they hold for all ticks outside the transition windows
+	float f_ns = linear_step(t_sunset  - hh - TRANS_DURATION, t_sunset  - hh,                  t);
+	float f_sm = linear_step(t_sunset  + hh,                  t_sunset  + hh + TRANS_DURATION, t);
+	float f_mr = linear_step(t_sunrise - hh - TRANS_DURATION, t_sunrise - hh,                  t);
+	float f_rn = linear_step(t_sunrise + hh,                  t_sunrise + hh + TRANS_DURATION, t);
+
+	// ---- COLOR BLENDS ----
+	vec3 sky_horizon = sky_hor_noon;
+	sky_horizon = mix(sky_horizon, sky_hor_sunset,   f_ns);
+	sky_horizon = mix(sky_horizon, sky_hor_midnight, f_sm);
+	sky_horizon = mix(sky_horizon, sky_hor_sunrise,  f_mr);
+	sky_horizon = mix(sky_horizon, sky_hor_noon,     f_rn);
+
+	vec3 sky_overhead = sky_ovr_noon;
+	sky_overhead = mix(sky_overhead, sky_ovr_sunset,   f_ns);
+	sky_overhead = mix(sky_overhead, sky_ovr_midnight, f_sm);
+	sky_overhead = mix(sky_overhead, sky_ovr_sunrise,  f_mr);
+	sky_overhead = mix(sky_overhead, sky_ovr_noon,     f_rn);
+
+	vec3 fog_distant = fog_dist_noon;
+	fog_distant = mix(fog_distant, fog_dist_sunset,   f_ns);
+	fog_distant = mix(fog_distant, fog_dist_midnight, f_sm);
+	fog_distant = mix(fog_distant, fog_dist_sunrise,  f_mr);
+	fog_distant = mix(fog_distant, fog_dist_noon,     f_rn);
+
+	vec3 fog_mist = fog_mist_noon;
+	fog_mist = mix(fog_mist, fog_mist_sunset,   f_ns);
+	fog_mist = mix(fog_mist, fog_mist_midnight, f_sm);
+	fog_mist = mix(fog_mist, fog_mist_sunrise,  f_mr);
+	fog_mist = mix(fog_mist, fog_mist_noon,     f_rn);
+
+	// ---- SKY OUTPUT ----
+	// Fully replaces Photon atmosphere LUT. direction_world.y = 0 at horizon, 1 overhead.
+	float horizon_weight = exp(-10.0 * direction_world.y);
+	atmosphere = mix(sky_overhead, sky_horizon, horizon_weight);
 
 	//--------------END------------------
 
@@ -315,6 +386,7 @@ void main() {
 
 		// Apply purkinje shift
 		fragment_color = purkinje_shift(fragment_color, vec2(0.0, 1.0));
+		
 	} else { // Terrain
 		// Sample ambient occlusion a while before using it (latency hiding)
 
@@ -650,33 +722,38 @@ void main() {
 	#endif
 #endif
 
-		//CUSTOM EDIT two-pass stylized fog
+		//CUSTOM EDIT two-pass stylized fog — colors driven by art-directed system above
 
-		bool enable_custom_fog = true; // true = on, false = off
+		bool enable_custom_fog = true;
 
 		if (enable_custom_fog) {
 
-			// Art direction colors
-			vec3 overhead_sky_color = vec3(0.1, 0.2, 0.7);  // deep blue — silhouette/ridge color
-			vec3 horizon_sky_color  = vec3(0.9, 0.85, 0.6); // light yellow — low altitude haze color
+			// ---- USER PARAMETERS (edit these) ----
+			float fog_start              = 10.0;
+			float fog_end                = 10.0;
+			float fog_opacity            = 1;
 
-			// Pass 1 — distance fog (deep blue)
-			float fog1_start      = 25.0 * 16.0;
-			float fog1_end        = 50.0 * 16.0;
-			float fog1_opacity    = 0.95;
-			float fog1_factor     = smoothstep(fog1_start, fog1_end, view_distance) * fog1_opacity;
-			fragment_color        = mix(fragment_color, overhead_sky_color, fog1_factor);
+			float mist_fog_start         = fog_start;
+			float mist_fog_end           = fog_end;
+			float mist_fog_opacity       = 1;
+			float mist_fog_height_start  = 90.0;
+			float mist_fog_height_end    = 91.0;
 
-			// Pass 2 — low altitude yellow haze
-			float fog2_start         = 25.0 * 16.0;
-			float fog2_end           = 50.0 * 16.0;
-			float fog2_opacity       = 0.2;
-			float fog2_height_start  = -64.0;
-			float fog2_height_end    = 220.0;
-			float fog2_dist_factor   = smoothstep(fog2_start, fog2_end, view_distance);
-			float fog2_height_factor = clamp01(1.0 - (position_world.y - fog2_height_start) / (fog2_height_end - fog2_height_start));
-			float fog2_factor        = fog2_dist_factor * fog2_height_factor * fog2_opacity;
-			fragment_color           = mix(fragment_color, horizon_sky_color, fog2_factor);
+			// ---- DERIVED (do not edit) ----
+			float fog_start_blocks       = fog_start      * 16.0;
+			float fog_end_blocks         = fog_end        * 16.0;
+			float mist_fog_start_blocks  = mist_fog_start * 16.0;
+			float mist_fog_end_blocks    = mist_fog_end   * 16.0;
+
+			// Pass 1 — distance fog
+			float fog_factor             = linear_step(fog_start_blocks, fog_end_blocks, view_distance) * fog_opacity;
+			fragment_color               = mix(fragment_color, fog_distant, fog_factor);
+
+			// Pass 2 — low altitude mist
+			float mist_fog_dist_factor   = linear_step(mist_fog_start_blocks, mist_fog_end_blocks, view_distance);
+			float mist_fog_height_factor = clamp01(1.0 - (position_world.y - mist_fog_height_start) / (mist_fog_height_end - mist_fog_height_start));
+			float mist_fog_factor        = mist_fog_dist_factor * mist_fog_height_factor * mist_fog_opacity;
+			fragment_color               = mix(fragment_color, fog_mist, mist_fog_factor);
 
 		}
 
@@ -685,5 +762,6 @@ void main() {
 		// Apply purkinje shift
 
 		fragment_color = purkinje_shift(fragment_color, light_levels);
+		
 	}
 }
