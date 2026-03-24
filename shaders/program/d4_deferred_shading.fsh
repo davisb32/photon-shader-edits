@@ -186,6 +186,38 @@ const bool colortex11MipmapEnabled = true;
 #include "/include/lighting/cloud_shadows.glsl"
 #endif
 
+//CUSTOM EDIT OKLAB perceptual blending
+vec3 oklab_to_rgb(vec3 lab) {
+	float lc = lab.x + 0.3963377774*lab.y + 0.2158037573*lab.z;
+	float mc = lab.x - 0.1055613458*lab.y - 0.0638541728*lab.z;
+	float sc = lab.x - 0.0894841775*lab.y - 1.2914855480*lab.z;
+	vec3 lms = vec3(lc, mc, sc);
+	lms = lms * lms * lms;
+	return vec3(
+		4.0767416621*lms.x - 3.3077115913*lms.y + 0.2309699292*lms.z,
+		-1.2684380046*lms.x + 2.6097574011*lms.y - 0.3413193965*lms.z,
+		-0.0041960863*lms.x - 0.7034186147*lms.y + 1.7076147010*lms.z
+	);
+}
+
+vec3 rgb_to_oklab(vec3 c) {
+	float l = 0.4122214708*c.r + 0.5363325363*c.g + 0.0514459929*c.b;
+	float m = 0.2119034982*c.r + 0.6806995451*c.g + 0.1073969566*c.b;
+	float s = 0.0883024619*c.r + 0.2817188376*c.g + 0.6299787005*c.b;
+	vec3 lms = pow(vec3(l, m, s), vec3(1.0/3.0));
+	return vec3(
+		0.2104542553*lms.x + 0.7936177850*lms.y - 0.0040720468*lms.z,
+		1.9779984951*lms.x - 2.4285922050*lms.y + 0.4505937099*lms.z,
+		0.0259040371*lms.x + 0.7827717662*lms.y - 0.8086757660*lms.z
+	);
+}
+
+vec3 oklab_mix(vec3 a, vec3 b, float t) {
+	return oklab_to_rgb(mix(rgb_to_oklab(a), rgb_to_oklab(b), t));
+}
+
+//--------------END------------------
+
 void main() {
 #if !defined USE_SEPARATE_ENTITY_DRAWS
 	colortex3_clear = vec4(0.0);
@@ -297,33 +329,33 @@ void main() {
 
 	// ---- COLOR BLENDS ----
 	vec3 sky_horizon = sky_hor_noon;
-	sky_horizon = mix(sky_horizon, sky_hor_sunset,   f_ns);
-	sky_horizon = mix(sky_horizon, sky_hor_midnight, f_sm);
-	sky_horizon = mix(sky_horizon, sky_hor_sunrise,  f_mr);
-	sky_horizon = mix(sky_horizon, sky_hor_noon,     f_rn);
+	sky_horizon = oklab_mix(sky_horizon, sky_hor_sunset,   f_ns);
+	sky_horizon = oklab_mix(sky_horizon, sky_hor_midnight, f_sm);
+	sky_horizon = oklab_mix(sky_horizon, sky_hor_sunrise,  f_mr);
+	sky_horizon = oklab_mix(sky_horizon, sky_hor_noon,     f_rn);
 
 	vec3 sky_overhead = sky_ovr_noon;
-	sky_overhead = mix(sky_overhead, sky_ovr_sunset,   f_ns);
-	sky_overhead = mix(sky_overhead, sky_ovr_midnight, f_sm);
-	sky_overhead = mix(sky_overhead, sky_ovr_sunrise,  f_mr);
-	sky_overhead = mix(sky_overhead, sky_ovr_noon,     f_rn);
+	sky_overhead = oklab_mix(sky_overhead, sky_ovr_sunset,   f_ns);
+	sky_overhead = oklab_mix(sky_overhead, sky_ovr_midnight, f_sm);
+	sky_overhead = oklab_mix(sky_overhead, sky_ovr_sunrise,  f_mr);
+	sky_overhead = oklab_mix(sky_overhead, sky_ovr_noon,     f_rn);
 
 	vec3 fog_distant = fog_dist_noon;
-	fog_distant = mix(fog_distant, fog_dist_sunset,   f_ns);
-	fog_distant = mix(fog_distant, fog_dist_midnight, f_sm);
-	fog_distant = mix(fog_distant, fog_dist_sunrise,  f_mr);
-	fog_distant = mix(fog_distant, fog_dist_noon,     f_rn);
+	fog_distant = oklab_mix(fog_distant, fog_dist_sunset,   f_ns);
+	fog_distant = oklab_mix(fog_distant, fog_dist_midnight, f_sm);
+	fog_distant = oklab_mix(fog_distant, fog_dist_sunrise,  f_mr);
+	fog_distant = oklab_mix(fog_distant, fog_dist_noon,     f_rn);
 
 	vec3 fog_mist = fog_mist_noon;
-	fog_mist = mix(fog_mist, fog_mist_sunset,   f_ns);
-	fog_mist = mix(fog_mist, fog_mist_midnight, f_sm);
-	fog_mist = mix(fog_mist, fog_mist_sunrise,  f_mr);
-	fog_mist = mix(fog_mist, fog_mist_noon,     f_rn);
+	fog_mist = oklab_mix(fog_mist, fog_mist_sunset,   f_ns);
+	fog_mist = oklab_mix(fog_mist, fog_mist_midnight, f_sm);
+	fog_mist = oklab_mix(fog_mist, fog_mist_sunrise,  f_mr);
+	fog_mist = oklab_mix(fog_mist, fog_mist_noon,     f_rn);
 
 	// ---- SKY OUTPUT ----
 	// Fully replaces Photon atmosphere LUT. direction_world.y = 0 at horizon, 1 overhead.
-	float horizon_weight = exp(-10.0 * direction_world.y);
-	atmosphere = mix(sky_overhead, sky_horizon, horizon_weight);
+	float horizon_weight = exp(-4.0 * direction_world.y);
+	atmosphere = oklab_mix(sky_overhead, sky_horizon, horizon_weight);
 
 	//--------------END------------------
 
@@ -729,15 +761,15 @@ void main() {
 		if (enable_custom_fog) {
 
 			// ---- USER PARAMETERS (edit these) ----
-			float fog_start              = 10.0;
-			float fog_end                = 10.0;
+			float fog_start              = 5.0;
+			float fog_end                = 20.0;
 			float fog_opacity            = 1;
 
 			float mist_fog_start         = fog_start;
 			float mist_fog_end           = fog_end;
 			float mist_fog_opacity       = 1;
-			float mist_fog_height_start  = 90.0;
-			float mist_fog_height_end    = 91.0;
+			float mist_fog_height_start  = 0.0;
+			float mist_fog_height_end    = 1.0;
 
 			// ---- DERIVED (do not edit) ----
 			float fog_start_blocks       = fog_start      * 16.0;
