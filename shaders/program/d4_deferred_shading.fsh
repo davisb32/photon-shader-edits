@@ -186,7 +186,7 @@ const bool colortex11MipmapEnabled = true;
 #include "/include/lighting/cloud_shadows.glsl"
 #endif
 
-//CUSTOM EDIT OKLAB perceptual blending
+//CUSTOM EDIT OKLab perceptual blending — used for time-of-day color transitions
 vec3 oklab_to_rgb(vec3 lab) {
 	float lc = lab.x + 0.3963377774*lab.y + 0.2158037573*lab.z;
 	float mc = lab.x - 0.1055613458*lab.y - 0.0638541728*lab.z;
@@ -194,7 +194,7 @@ vec3 oklab_to_rgb(vec3 lab) {
 	vec3 lms = vec3(lc, mc, sc);
 	lms = lms * lms * lms;
 	return vec3(
-		4.0767416621*lms.x - 3.3077115913*lms.y + 0.2309699292*lms.z,
+		 4.0767416621*lms.x - 3.3077115913*lms.y + 0.2309699292*lms.z,
 		-1.2684380046*lms.x + 2.6097574011*lms.y - 0.3413193965*lms.z,
 		-0.0041960863*lms.x - 0.7034186147*lms.y + 1.7076147010*lms.z
 	);
@@ -215,7 +215,21 @@ vec3 rgb_to_oklab(vec3 c) {
 vec3 oklab_mix(vec3 a, vec3 b, float t) {
 	return oklab_to_rgb(mix(rgb_to_oklab(a), rgb_to_oklab(b), t));
 }
+//--------------END------------------
 
+//CUSTOM EDIT Catmull-Rom spline — used for smooth sky gradient bands within each time period
+// Blends smoothly from P1 to P2, shaped by neighbours P0 and P3.
+// t=0 returns P1, t=1 returns P2.
+vec3 catmull_rom(vec3 p0, vec3 p1, vec3 p2, vec3 p3, float t) {
+	float t2 = t * t;
+	float t3 = t2 * t;
+	return clamp(0.5 * (
+		  2.0 * p1
+		+ (-p0 + p2)                        * t
+		+ ( 2.0*p0 - 5.0*p1 + 4.0*p2 - p3) * t2
+		+ (-p0 + 3.0*p1 - 3.0*p2 + p3)     * t3
+	), 0.0, 1.0);
+}
 //--------------END------------------
 
 void main() {
@@ -272,44 +286,119 @@ void main() {
 
 	//CUSTOM EDIT fully art-directed sky and fog system
 	// Colors: RGB 0-255. Times: Minecraft ticks (0 = 6 AM, 6000 = noon, 12000 = 6 PM, 18000 = midnight)
+	// Time blending: original sequential oklab_mix chain with full hold/transition control
+	// Sky gradients: Catmull-Rom spline per time period for smooth color bands
 
 	#define RGB(r,g,b) (srgb_eotf_inv(vec3(float(r), float(g), float(b)) / 255.0) * rec709_to_working_color)
 
+	// y: 0.0 = horizon, 1.0 = straight up
+	float y = clamp(direction_world.y, 0.0, 1.0);
+
 	// ---- TIME PARAMETERS (edit these) ----
-	const float SUNSET_TIME    = 12000.0;  // tick of peak sunset center
+	const float SUNSET_TIME    = 12500.0;  // tick of peak sunset center
 	const float SUNRISE_TIME   =     0.0;  // tick of peak sunrise center (0 = 6 AM)
-	const float COLOR_HOLD     =  1000.0;  // ticks sunset/sunrise held at full strength
+	const float COLOR_HOLD     =  500.0;  // ticks sunset/sunrise held at full strength
 	const float TRANS_DURATION =  1000.0;  // ticks each crossfade takes
 
-	// ---- SKY & FOG COLORS (edit these) ----
-
+	// ============================================================
 	// ---- NOON ----
-	vec3 sky_ovr_noon  = RGB(255,0,0);
-	vec3 sky_hor_noon  = RGB(0,255,0);
-	vec3 fog_dist_noon = RGB(0,255,255);
-	vec3 fog_mist_noon = RGB(255,255,0);
+	// Simple two-color sky with exponential decay falloff.
+	// Catmull-Rom with phantom endpoints gives smooth rolloff at edges.
+	// ============================================================
+	vec3 sky_ovr_noon  = RGB( 30,  90, 210);
+	vec3 sky_hor_noon  = RGB(120, 195, 255);
+	vec3 fog_dist_noon = sky_ovr_noon;
+	vec3 fog_mist_noon = sky_hor_noon;
 
+	vec3 sky_noon = catmull_rom(
+		2.0*sky_ovr_noon - sky_hor_noon,  // phantom P0
+		sky_ovr_noon,                      // P1 — overhead
+		sky_hor_noon,                      // P2 — horizon
+		2.0*sky_hor_noon - sky_ovr_noon,  // phantom P3
+		exp(-4.0 * y)                      // t driven by exponential decay
+	);
+
+	// ============================================================
 	// ---- SUNSET ----
-	vec3 sky_ovr_sunset    = RGB( 15,  20,  80);  // deep indigo
-	vec3 sky_hor_sunset    = RGB(255,  95,  30);  // vivid orange
-	vec3 fog_dist_sunset   = sky_ovr_sunset;
-	vec3 fog_mist_sunset   = sky_hor_sunset;
+	// Four-stop gradient. Catmull-Rom with real neighbours gives
+	// smooth curves through each band with no seams.
+	// ============================================================
 
+	vec3 sky_sunset_1 = RGB(251,83,42);
+	vec3 sky_sunset_2 = RGB(214,60,61);
+	vec3 sky_sunset_3 = RGB(134,71,114);
+	vec3 sky_sunset_4 = RGB(36,55,115);
+	vec3 sky_sunset_5 = RGB(21,36,75);
+	vec3 fog_dist_sunset = RGB(21,36,75);
+	vec3 fog_mist_sunset = RGB(251,83,42);
+
+	float sy = clamp(y / 0.40, 0.0, 1.0);
+
+	vec3 sky_sunset;
+	if (sy < 0.15) {
+		sky_sunset = catmull_rom(2.0*sky_sunset_1 - sky_sunset_2, sky_sunset_1, sky_sunset_2, sky_sunset_3, sy / 0.15);
+	} else if (sy < 0.35) {
+		sky_sunset = catmull_rom(sky_sunset_1, sky_sunset_2, sky_sunset_3, sky_sunset_4, (sy - 0.15) / 0.20);
+	} else if (sy < 0.75) {
+		sky_sunset = catmull_rom(sky_sunset_2, sky_sunset_3, sky_sunset_4, sky_sunset_5, (sy - 0.35) / 0.40);
+	} else {
+		float t = 1.0 - exp(-2.0 * (sy - 0.75) / (1.0 - 0.75));
+		sky_sunset = oklab_mix(sky_sunset_4, sky_sunset_5, t);
+	}
+
+	// ============================================================
 	// ---- MIDNIGHT ----
-	vec3 sky_ovr_midnight  = RGB(10,20,77);
-	vec3 sky_hor_midnight  = RGB(11,83,144);
-	vec3 fog_dist_midnight = RGB(1,27,69);
-	vec3 fog_mist_midnight = RGB(0,40,106);
+	// Tight exponential — overhead dominates fast, thin horizon band.
+	// ============================================================
+	vec3 sky_ovr_midnight  = RGB( 10,  20,  77);
+	vec3 sky_hor_midnight  = RGB( 11,  83, 144);
+	vec3 fog_dist_midnight = RGB(  1,  27,  69);
+	vec3 fog_mist_midnight = RGB(  0,  40, 106);
 
+	vec3 sky_midnight = catmull_rom(
+		2.0*sky_ovr_midnight - sky_hor_midnight,  // phantom P0
+		sky_ovr_midnight,
+		sky_hor_midnight,
+		2.0*sky_hor_midnight - sky_ovr_midnight,  // phantom P3
+		exp(-8.0 * y)
+	);
+
+	// ============================================================
 	// ---- SUNRISE ----
-	vec3 sky_ovr_sunrise  = RGB(68,133,175);
-	vec3 sky_hor_sunrise  = RGB(255,147,70);
-	vec3 fog_dist_sunrise = RGB(61,92,123);
-	vec3 fog_mist_sunrise = RGB(169,103,105);
+	// Three-stop gradient. Warm amber at horizon, golden mid, cool blue overhead.
+	// Band positions: 0.0 (hor) → 0.2 (mid) → 1.0 (ovr)
+	// ============================================================
+	vec3 sky_ovr_sunrise  = RGB( 68, 133, 175);
+	vec3 sky_hor_sunrise  = RGB(255, 147,  70);
+	vec3 fog_dist_sunrise = RGB( 61,  92, 123);
+	vec3 fog_mist_sunrise = RGB(169, 103, 105);
 
+	vec3 sky_sunrise_mid  = RGB(255, 200, 120);  // warm golden band
+
+	vec3 sky_sunrise;
+	if (y < 0.2) {
+		sky_sunrise = catmull_rom(
+			2.0*sky_hor_sunrise - sky_sunrise_mid,  // phantom
+			sky_hor_sunrise,
+			sky_sunrise_mid,
+			sky_ovr_sunrise,
+			y / 0.2
+		);
+	} else {
+		sky_sunrise = catmull_rom(
+			sky_hor_sunrise,
+			sky_sunrise_mid,
+			sky_ovr_sunrise,
+			2.0*sky_ovr_sunrise - sky_sunrise_mid,  // phantom
+			(y - 0.2) / 0.8
+		);
+	}
+
+	// ============================================================
 	// ---- TIME BLEND SETUP ----
-	// Shift working time by 3000 ticks (= 9 AM) so no transition straddles the 0/24000 wrap boundary.
-	// All 4 transitions land cleanly inside [0, 24000] in shifted space.
+	// Original sequential oklab_mix chain with full timing control.
+	// Noon and midnight dominate; sunset/sunrise hold for COLOR_HOLD ticks.
+	// ============================================================
 	float mc_time = mod(float(worldTime), 24000.0);
 	float t       = mod(mc_time - 3000.0 + 24000.0, 24000.0);
 
@@ -319,27 +408,25 @@ void main() {
 
 	float hh = COLOR_HOLD * 0.5;
 
-	// Sequential blend factors — each one a one-way ramp
-	// Chain order: noon -> sunset -> midnight -> sunrise -> noon
-	// Noon and midnight dominate naturally; they hold for all ticks outside the transition windows
 	float f_ns = linear_step(t_sunset  - hh - TRANS_DURATION, t_sunset  - hh,                  t);
 	float f_sm = linear_step(t_sunset  + hh,                  t_sunset  + hh + TRANS_DURATION, t);
 	float f_mr = linear_step(t_sunrise - hh - TRANS_DURATION, t_sunrise - hh,                  t);
 	float f_rn = linear_step(t_sunrise + hh,                  t_sunrise + hh + TRANS_DURATION, t);
 
+	// ============================================================
 	// ---- COLOR BLENDS ----
-	vec3 sky_horizon = sky_hor_noon;
-	sky_horizon = oklab_mix(sky_horizon, sky_hor_sunset,   f_ns);
-	sky_horizon = oklab_mix(sky_horizon, sky_hor_midnight, f_sm);
-	sky_horizon = oklab_mix(sky_horizon, sky_hor_sunrise,  f_mr);
-	sky_horizon = oklab_mix(sky_horizon, sky_hor_noon,     f_rn);
+	// oklab_mix for time transitions — vivid, no muddy grays.
+	// Sky gradients already baked per-period above.
+	// ============================================================
 
-	vec3 sky_overhead = sky_ovr_noon;
-	sky_overhead = oklab_mix(sky_overhead, sky_ovr_sunset,   f_ns);
-	sky_overhead = oklab_mix(sky_overhead, sky_ovr_midnight, f_sm);
-	sky_overhead = oklab_mix(sky_overhead, sky_ovr_sunrise,  f_mr);
-	sky_overhead = oklab_mix(sky_overhead, sky_ovr_noon,     f_rn);
+	// Sky — blend the fully evaluated per-period gradients
+	atmosphere = sky_noon;
+	atmosphere = oklab_mix(atmosphere, sky_sunset,   f_ns);
+	atmosphere = oklab_mix(atmosphere, sky_midnight, f_sm);
+	atmosphere = oklab_mix(atmosphere, sky_sunrise,  f_mr);
+	atmosphere = oklab_mix(atmosphere, sky_noon,     f_rn);
 
+	// Fog blends
 	vec3 fog_distant = fog_dist_noon;
 	fog_distant = oklab_mix(fog_distant, fog_dist_sunset,   f_ns);
 	fog_distant = oklab_mix(fog_distant, fog_dist_midnight, f_sm);
@@ -351,11 +438,6 @@ void main() {
 	fog_mist = oklab_mix(fog_mist, fog_mist_midnight, f_sm);
 	fog_mist = oklab_mix(fog_mist, fog_mist_sunrise,  f_mr);
 	fog_mist = oklab_mix(fog_mist, fog_mist_noon,     f_rn);
-
-	// ---- SKY OUTPUT ----
-	// Fully replaces Photon atmosphere LUT. direction_world.y = 0 at horizon, 1 overhead.
-	float horizon_weight = exp(-4.0 * direction_world.y);
-	atmosphere = oklab_mix(sky_overhead, sky_horizon, horizon_weight);
 
 	//--------------END------------------
 
@@ -692,14 +774,11 @@ void main() {
 
 		float edge = get_edge_highlight(position_scene, flat_normal, depth, material_mask);
 
-		float edge_brightness = 0.75; // Increase to make edges brighter, decrease toward 0.0 to disable
-		float edge_saturation = 1.2; // Increase for more vivid edges, only affects edge pixels
+		float edge_brightness = 0.75;
+		float edge_saturation = 1.2;
 
 		float luma = dot(fragment_color, vec3(0.299, 0.587, 0.114));
 
-		// 1.0 + (edge_saturation - 1.0) * edge means:
-		// when edge=0 -> mix factor is 1.0 -> fragment_color unchanged
-		// when edge=1 -> mix factor is edge_saturation -> full saturation boost
 		fragment_color = mix(vec3(luma), fragment_color, 1.0 + (edge_saturation - 1.0) * edge);
 		fragment_color *= 1.0 + edge_brightness * edge;
 
@@ -763,13 +842,13 @@ void main() {
 			// ---- USER PARAMETERS (edit these) ----
 			float fog_start              = 5.0;
 			float fog_end                = 20.0;
-			float fog_opacity            = 1;
+			float fog_opacity            = 1.0;
 
 			float mist_fog_start         = fog_start;
 			float mist_fog_end           = fog_end;
-			float mist_fog_opacity       = 1;
+			float mist_fog_opacity       = 1.0;
 			float mist_fog_height_start  = 0.0;
-			float mist_fog_height_end    = 1.0;
+			float mist_fog_height_end    = 0.0;
 
 			// ---- DERIVED (do not edit) ----
 			float fog_start_blocks       = fog_start      * 16.0;
